@@ -1,0 +1,173 @@
+name: Build macOS 12 installer
+
+# Branch-only build tooling for support/macos-12. Produces an ad-hoc-signed,
+# universal (arm64 + x86_64) RIMES.app and an unsigned RIMES-<version>.pkg
+# whose deployment target is macOS 12, uploaded as a workflow artifact.
+#
+# This reuses the exact build/assemble/sign/package steps that release.yml uses
+# for manual ad-hoc artifacts, minus the protected signing/notarization creds.
+# It is NOT a formal release: the .pkg is unsigned and the .app is ad-hoc
+# signed, so end users must bypass Gatekeeper to install it on Monterey.
+#
+# Keep this workflow on the branch; do not merge it to main as part of the
+# 4-file deployment-target change unless you want a permanent build-artifact job.
+
+on:
+  push:
+    branches: [support/macos-12]
+    paths:
+      - Package.swift
+      - Shared/Package.swift
+      - Info.plist
+      - Shared/Sources/RimesCore/BufferPlugin.swift
+      - .github/workflows/build-macos12.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build universal RIMES.app (macOS 12) + pkg
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - name: Checkout (with submodule)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          submodules: true
+          persist-credentials: false
+
+      - name: Prepare pinned official plugin sources
+        run: python3 scripts/prepare-official-plugins.py
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Swift version
+        run: swift --version
+
+      # The deployment target comes from Package.swift (.macOS("12.0")); SPM
+      # passes it through as -target ...-apple-macos12.0, so each slice's
+      # LC_BUILD_VERSION minOS is 12.0. vtool confirms it after the build.
+      - name: "Build (release, universal: arm64 + x86_64)"
+        run: |
+          set -euo pipefail
+          for arch in arm64 x86_64; do
+            swift build -c release --arch "$arch"
+          done
+          arm_bin="$(swift build -c release --arch arm64 --show-bin-path)"
+          x86_bin="$(swift build -c release --arch x86_64 --show-bin-path)"
+          BIN_DIR="$RUNNER_TEMP/rimes-universal"
+          rm -rf "$BIN_DIR"
+          mkdir -p "$BIN_DIR"
+          lipo -create "$arm_bin/RimeBuffer" "$x86_bin/RimeBuffer" -output "$BIN_DIR/RimeBuffer"
+          lipo "$BIN_DIR/RimeBuffer" -verify_arch arm64 x86_64
+          # Resource bundles hold no code; both slices produce the same set.
+          [[ "$(cd "$arm_bin" && ls -d -- *.bundle 2>/dev/null)" \
+            == "$(cd "$x86_bin" && ls -d -- *.bundle 2>/dev/null)" ]]
+          for resource_bundle in "$arm_bin/"*.bundle; do
+            [ -d "$resource_bundle" ] || continue
+            diff -r "$resource_bundle" "$x86_bin/$(basename "$resource_bundle")"
+            cp -R "$resource_bundle" "$BIN_DIR/"
+          done
+          echo "BIN_DIR=$BIN_DIR" >> "$GITHUB_ENV"
+
+          # Confirm the deployment target is 12 on both slices.
+          vtool -show-build "$arm_bin/RimeBuffer" | awk '$1=="minos"{print "arm64 minOS:",$2}'
+          vtool -show-build "$x86_bin/RimeBuffer" | awk '$1=="minos"{print "x86_64 minOS:",$2}'
+
+      - name: Fetch bundled librime runtime
+        run: ./scripts/fetch-rime.sh --force
+
+      - name: Generate RIMES brand assets
+        run: bash Logo/generate.sh
+
+      - name: Assemble the app bundle
+        env:
+          RIMES_REQUIRE_SIGNING: 'false'
+        run: |
+          set -euo pipefail
+          APP="RIMES.app"
+          rm -rf "$APP"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" \
+                   "$APP/Contents/Frameworks" "$APP/Contents/SharedSupport"
+          cp "$BIN_DIR/RimeBuffer" "$APP/Contents/MacOS/RIMES"
+          for resource_bundle in "$BIN_DIR/"*.bundle; do
+            [ -d "$resource_bundle" ] || continue
+            cp -R "$resource_bundle" "$APP/Contents/Resources/"
+          done
+          cp LICENSE NOTICE LICENSING.md ATTRIBUTION.md THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/"
+          cp -R LICENSES "$APP/Contents/Resources/"
+          cp Info.plist "$APP/Contents/Info.plist"
+          cp -R Vendor/rime/Frameworks/* "$APP/Contents/Frameworks/"
+          cp -R Vendor/rime/SharedSupport/* "$APP/Contents/SharedSupport/"
+          find "$APP/Contents/SharedSupport" -maxdepth 1 -type f -name '*.schema.yaml' -delete
+          cp -R rime-data/* "$APP/Contents/SharedSupport/"
+          [ -f Logo/AppIcon.icns ] && cp Logo/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns" || true
+          cp -R Resources/*.lproj "$APP/Contents/Resources/" 2>/dev/null || true
+          cp Resources/etinput.pdf "$APP/Contents/Resources/" 2>/dev/null || true
+          cp Resources/etinput-menu.pdf "$APP/Contents/Resources/" 2>/dev/null || true
+          cp Resources/menubar-template.png "$APP/Contents/Resources/" 2>/dev/null || true
+          ./scripts/sign-macos-app.sh "$APP"
+          echo "----- assembled bundle -----"
+          file "$APP/Contents/MacOS/RIMES"
+          /usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Contents/Info.plist"
+          codesign --display --verbose=4 "$APP" 2>&1 | grep -E 'Identifier|Signature'
+          du -sh "$APP"
+
+      - name: Verify bundled Rime runtime + changed-area smokes
+        run: |
+          set -euo pipefail
+          APP="$GITHUB_WORKSPACE/RIMES.app"
+          BIN="$APP/Contents/MacOS/RIMES"
+          SHARED="$APP/Contents/SharedSupport"
+          FRAMEWORKS="$APP/Contents/Frameworks"
+          # Engine + bundled-runtime smokes (need SharedSupport/Frameworks).
+          ENGINE_ROOT="$RUNNER_TEMP/rimebuffer-engine-smoke"
+          mkdir -p "$ENGINE_ROOT"
+          RIMEBUFFER_USER_DIR="$ENGINE_ROOT" \
+          RIMEBUFFER_SHARED_DIR="$SHARED" \
+          RIMEBUFFER_FRAMEWORKS_DIR="$FRAMEWORKS" \
+            "$BIN" smoke
+          "$BIN" buffer-music-smoke
+          # Changed-area smokes: BufferPluginRunner is exercised by the plugin
+          # smokes; settings + clipboard + buffer cover the broader build.
+          for s in schema-smoke buffer-smoke buffer-window-smoke \
+                   clipboard-history-smoke settings-routing-smoke \
+                   plugin-configuration-smoke plugin-smoke; do
+            "$BIN" "$s"
+          done
+
+      - name: Make unsigned .pkg + ad-hoc .app zip
+        run: |
+          set -euo pipefail
+          VERSION="$(cat VERSION)"
+          PKG="RIMES-${VERSION}-macos12.pkg"
+          ZIP="RIMES-${VERSION}-macos12.zip"
+          codesign --verify --deep --strict --verbose=2 RIMES.app
+          codesign --display --verbose=4 RIMES.app 2>&1 | grep -Fq 'Signature=adhoc'
+          ditto -c -k --sequesterRsrc --keepParent RIMES.app "$ZIP"
+          ./scripts/make-pkg.sh "$VERSION" RIMES.app "$PKG"
+          # Confirm the pkg's payload app targets macOS 12.
+          echo "----- pkg -----"
+          ls -lh "$PKG" "$ZIP"
+          /usr/sbin/pkgutil --check-signature "$PKG" 2>&1 | grep -Fq 'Status: no signature' || true
+
+      - name: Upload .pkg
+        uses: actions/upload-artifact@b4b6b782a51e6a6f4fd2d515057a51f06f1f0a0c # v4.4.0
+        with:
+          name: RIMES-macos12-pkg
+          path: RIMES-*-macos12.pkg
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload .app zip
+        uses: actions/upload-artifact@b4b6b782a51e6a6f4fd2d515057a51f06f1f0a0c # v4.4.0
+        with:
+          name: RIMES-macos12-app
+          path: RIMES-*-macos12.zip
+          if-no-files-found: error
+          retention-days: 14
