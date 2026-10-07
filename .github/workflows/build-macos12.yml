@@ -157,7 +157,7 @@ jobs:
           /usr/sbin/pkgutil --check-signature "$PKG" 2>&1 | grep -Fq 'Status: no signature' || true
 
       - name: Upload .pkg
-        uses: actions/upload-artifact@b4b6b782a51e6a6f4fd2d515057a51f06f1f0a0c # v4.4.0
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: RIMES-macos12-pkg
           path: RIMES-*-macos12.pkg
@@ -165,7 +165,7 @@ jobs:
           retention-days: 14
 
       - name: Upload .app zip
-        uses: actions/upload-artifact@b4b6b782a51e6a6f4fd2d515057a51f06f1f0a0c # v4.4.0
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: RIMES-macos12-app
           path: RIMES-*-macos12.zip
