@@ -292,9 +292,15 @@ final class RemarkableAppleVisionOCR: RemarkablePDFTextRecognizing {
     )
     private static let languageResolver = RemarkableVisionLanguageResolver {
         let request = VNRecognizeTextRequest()
-        request.revision = VNRecognizeTextRequestRevision3
+        request.revision = recognitionRevision
         request.recognitionLevel = .accurate
         return try request.supportedRecognitionLanguages()
+    }
+
+    /// `VNRecognizeTextRequestRevision3` is macOS 13+; fall back to revision 2.
+    private static var recognitionRevision: Int {
+        if #available(macOS 13, *) { return VNRecognizeTextRequestRevision3 }
+        return VNRecognizeTextRequestRevision2
     }
 
     init() {
@@ -371,7 +377,7 @@ final class RemarkableAppleVisionOCR: RemarkablePDFTextRecognizing {
 
         guard !task.isCancelled else { return .failure(.cancelled) }
         let request = VNRecognizeTextRequest()
-        request.revision = VNRecognizeTextRequestRevision3
+        request.revision = recognitionRevision
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true
         do {
@@ -405,8 +411,10 @@ final class RemarkableAppleVisionOCR: RemarkablePDFTextRecognizing {
     ) throws {
         let configuration = try languageResolver.resolve(mode)
         request.recognitionLanguages = configuration.recognitionLanguages
-        request.automaticallyDetectsLanguage =
-            configuration.automaticallyDetectsLanguage
+        if #available(macOS 13, *) {
+            request.automaticallyDetectsLanguage =
+                configuration.automaticallyDetectsLanguage
+        }
     }
 
     private static func render(

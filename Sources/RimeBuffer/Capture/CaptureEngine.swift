@@ -51,7 +51,7 @@ enum CaptureEngine {
     static func recognize(_ image: CGImage) throws -> String {
         let text = VNRecognizeTextRequest()
         text.recognitionLevel = .accurate; text.usesLanguageCorrection = true
-        text.automaticallyDetectsLanguage = true
+        if #available(macOS 13, *) { text.automaticallyDetectsLanguage = true }
         let codes = VNDetectBarcodesRequest()
         try VNImageRequestHandler(cgImage: image).perform([text, codes])
         let lines = (text.results ?? []).compactMap { $0.topCandidates(1).first?.string }

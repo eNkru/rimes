@@ -30,7 +30,16 @@ enum BufferSpeechVoiceResolver {
 
     static func voiceLanguage(for languageID: String,
                               installed: [String],
-                              userRegion: String? = Locale.current.region?.identifier) -> String? {
+                              userRegion: String? = nil) -> String? {
+        // `Locale.Region` is macOS 13+; fall back to `regionCode` on 12.3.
+        var userRegion = userRegion
+        if userRegion == nil {
+            if #available(macOS 13, *) {
+                userRegion = Locale.current.region?.identifier
+            } else {
+                userRegion = Locale.current.regionCode
+            }
+        }
         let installed = installed.map(normalized)
         let wanted = normalized(languageID)
         guard !wanted.isEmpty, wanted != "auto" else { return nil }

@@ -88,8 +88,10 @@ final class CaptureRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptu
                 config.height = max(2,Int(CGFloat(config.height)*factor)/2*2)
                 config.minimumFrameInterval = CMTime(value:1,timescale:CMTimeScale(options.fps))
                 config.showsCursor = options.cursor
-                config.capturesAudio = options.systemAudio && options.format != "GIF"
-                config.sampleRate = 48000; config.channelCount = 2
+                if #available(macOS 13, *) {
+                    config.capturesAudio = options.systemAudio && options.format != "GIF"
+                    config.sampleRate = 48000; config.channelCount = 2
+                }
                 if #available(macOS 14.2, *) { config.includeChildWindows = true }
                 self.size = CGSize(width:config.width,height:config.height)
                 let filter = self.filter(target:target,content:content,chrome:chrome)
@@ -112,14 +114,14 @@ final class CaptureRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptu
                     input.expectsMediaDataInRealTime = true
                     guard writer.canAdd(input) else { throw CaptureError.message("音频编码配置不可用") }; writer.add(input); return input
                 }
-                if config.capturesAudio { self.systemAudio = try audioInput(channels:2) }
+                if #available(macOS 13, *), config.capturesAudio { self.systemAudio = try audioInput(channels:2) }
                 if options.microphone, options.format != "GIF" { self.microphone = try audioInput(channels:1) }
                 guard writer.startWriting() else { throw writer.error ?? CaptureError.message("无法开始写入视频") }
                 try self.prepareDevices(options)
                 let stream = SCStream(filter:filter,configuration:config,delegate:self)
                 self.stream = stream
                 try stream.addStreamOutput(self,type:.screen,sampleHandlerQueue:self.queue)
-                if config.capturesAudio { try stream.addStreamOutput(self,type:.audio,sampleHandlerQueue:self.queue) }
+                if #available(macOS 13, *), config.capturesAudio { try stream.addStreamOutput(self,type:.audio,sampleHandlerQueue:self.queue) }
                 self.startedAt = Date()
                 stream.startCapture { error in
                     self.queue.async {
@@ -234,7 +236,7 @@ final class CaptureRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptu
         if IsSecureEventInputEnabled() { setPaused(true) }
         guard !finishing, !paused else { return }
         if type == .screen { appendScreen(sampleBuffer) }
-        else if type == .audio { appendAudio(sampleBuffer,input:systemAudio) }
+        else if #available(macOS 13, *), type == .audio { appendAudio(sampleBuffer,input:systemAudio) }
     }
     func captureOutput(_ output:AVCaptureOutput,didOutput sampleBuffer:CMSampleBuffer,from connection:AVCaptureConnection) {
         if IsSecureEventInputEnabled() { setPaused(true) }
@@ -338,7 +340,7 @@ final class CaptureRecorder: NSObject, SCStreamOutput, SCStreamDelegate, AVCaptu
         self.stream = nil
         stream.stopCapture { _ in
             try? stream.removeStreamOutput(self, type: .screen)
-            try? stream.removeStreamOutput(self, type: .audio)
+            if #available(macOS 13, *) { try? stream.removeStreamOutput(self, type: .audio) }
         }
     }
     func stop(completion:@escaping(Result<(URL,Double),Error>)->Void) {

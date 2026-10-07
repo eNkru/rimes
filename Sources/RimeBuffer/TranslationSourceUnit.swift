@@ -75,11 +75,18 @@ enum TranslationSourceUnitBuilder {
         let trailing = String(unit.sourceText.reversed().prefix(while: \.isWhitespace).reversed())
         if !trailing.isEmpty {
             result += trailing
-        } else if !["zh", "ja", "th", "lo", "km", "my"].contains(
-                    Locale.Language(identifier: targetLanguageID).languageCode?.identifier ?? ""
-                  ) {
+        } else if !["zh", "ja", "th", "lo", "km", "my"].contains(languageCode(for: targetLanguageID)) {
             result += " "
         }
         return result
+    }
+
+    /// `Locale.Language` (Translation framework) is macOS 13+. Fall back to
+    /// `Locale(identifier:).languageCode` so this builds and runs on macOS 12.3.
+    private static func languageCode(for identifier: String) -> String {
+        if #available(macOS 13, *) {
+            return Locale.Language(identifier: identifier).languageCode?.identifier ?? ""
+        }
+        return Locale(identifier: identifier).languageCode ?? ""
     }
 }
