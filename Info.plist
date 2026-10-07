@@ -73,7 +73,7 @@
 	<key>LSBackgroundOnly</key>
 	<false/>
 	<key>LSMinimumSystemVersion</key>
-	<string>12.0</string>
+	<string>12.3</string>
 	<key>NSCameraUsageDescription</key>
 	<string>在你开启录屏摄像头时添加讲解画面。</string>
 	<key>NSMicrophoneUsageDescription</key>

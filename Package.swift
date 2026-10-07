@@ -9,7 +9,7 @@ precondition(FileManager.default.fileExists(atPath: sourceRoot.appendingPathComp
 
 let package = Package(
     name: "RimeBuffer",
-    platforms: [.macOS("12.0")],
+    platforms: [.macOS("12.3")],
     dependencies: [
         .package(path: "Shared"),
         .package(
