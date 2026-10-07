@@ -20,6 +20,15 @@ on:
       - Shared/Package.swift
       - Info.plist
       - Shared/Sources/RimesCore/BufferPlugin.swift
+      - Sources/RimeBuffer/BufferSpeech.swift
+      - Sources/RimeBuffer/Capture/CaptureEngine.swift
+      - Sources/RimeBuffer/Capture/CaptureRecorder.swift
+      - Sources/RimeBuffer/RemarkableLocalOCR.swift
+      - Sources/RimeBuffer/TranslationSourceUnit.swift
+      - Sources/RimeBuffer/AppleTranslationPlugin.swift
+      - Sources/RimeBuffer/Translation/AppleTranslationSessionBridge.swift
+      - OfficialPlugins
+      - plugins.lock.json
       - .github/workflows/build-macos12.yml
   workflow_dispatch:
 
