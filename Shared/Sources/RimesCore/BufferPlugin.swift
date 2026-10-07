@@ -33,7 +33,7 @@ public struct BufferPluginResult {
 @MainActor public final class BufferPluginRunner {
     private struct Job {
         let id: UUID, plugin: any BufferPlugin, request: BufferPluginRequest
-        let deadline: ContinuousClock.Instant
+        let deadline: Date
         let preview: @MainActor (String) -> Void
         let completion: @MainActor (Result<BufferPluginResult, Error>) -> Void
     }
@@ -52,14 +52,15 @@ public struct BufferPluginResult {
                        completion: @escaping @MainActor (Result<BufferPluginResult, Error>) -> Void) {
         cancel()
         let id = UUID(); current = id
-        pending = Job(id: id, plugin: plugin, request: request, deadline: .now.advanced(by: .nanoseconds(Int64(min(delayNanoseconds, UInt64(Int64.max))))), preview: preview, completion: completion)
+        pending = Job(id: id, plugin: plugin, request: request, deadline: Date().addingTimeInterval(Double(min(delayNanoseconds, UInt64(Int64.max))) / 1e9), preview: preview, completion: completion)
         guard worker == nil else { return }
         worker = Task { [weak self] in await self?.drain() }
     }
     private func drain() async {
         while let job = pending {
             pending = nil
-            let timer = Task<Void, Never> { try? await Task.sleep(until: job.deadline, clock: .continuous) }
+            let remaining = max(0, job.deadline.timeIntervalSinceNow)
+            let timer = Task<Void, Never> { try? await Task.sleep(nanoseconds: UInt64(remaining * 1e9)) }
             debounce = timer
             await timer.value
             debounce = nil
